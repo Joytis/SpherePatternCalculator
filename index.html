@@ -210,7 +210,25 @@
 
   <div class="pattern-section">
     <h2>Sewing Pattern</h2>
-    <p>One of four equivalent panels. Sew the curved seam edges of adjacent panels together to form the spherical cap.</p>
+    <p>Sew the curved seam edges of adjacent panels together to form the spherical cap.</p>
+
+    <div class="card" style="width:100%;">
+      <div class="field-group">
+        <label for="seg-slider">Number of segments</label>
+        <div class="slider-row">
+          <input id="seg-slider" type="range" min="1" max="20" step="1" value="4" />
+          <input id="seg-text"   type="number" min="1" max="20" step="1" value="4" />
+        </div>
+      </div>
+      <div class="field-group" style="margin-bottom:0;">
+        <label for="sa-slider">Seam allowance (in)</label>
+        <div class="slider-row">
+          <input id="sa-slider" type="range" min="0" max="1" step="0.125" value="0.375" />
+          <input id="sa-text"   type="number" min="0" max="1" step="0.125" value="0.375" />
+        </div>
+      </div>
+    </div>
+
     <canvas id="pattern-canvas" width="560" height="520"></canvas>
     <div style="display:flex;gap:0.75rem;flex-wrap:wrap;justify-content:center;">
       <button id="export-png-btn" style="background:#1d4ed8;color:#e2e8f0;border:none;border-radius:0.5rem;padding:0.6rem 1.4rem;font-size:0.95rem;cursor:pointer;">Export Pattern as PNG</button>
@@ -369,21 +387,31 @@
       ctx.stroke();
     }
 
+    const segSlider = document.getElementById("seg-slider");
+    const segText   = document.getElementById("seg-text");
+    const saSlider  = document.getElementById("sa-slider");
+    const saText    = document.getElementById("sa-text");
+
+    bindField(segSlider, segText, () => { if (lastPatternArgs) drawPattern(...lastPatternArgs.slice(0,3)); });
+    bindField(saSlider,  saText,  () => { if (lastPatternArgs) drawPattern(...lastPatternArgs.slice(0,3)); });
+
     let lastPatternArgs = null;
 
     function drawPatternLight(ctx, W, H) {
       if (!lastPatternArgs) return;
-      const [R, d, sliceR] = lastPatternArgs;
+      const [R, d, sliceR, nGores, saIn] = lastPatternArgs;
       renderPattern(ctx, W, H, R, d, sliceR, {
         bg: "#ffffff", fill: "rgba(251,146,60,0.12)",
         seam: "rgb(220,100,20)", base: "#1d4ed8",
         axis: "#cbd5e1", dot: "rgb(220,100,20)",
         dim: "#475569", lab: "#1e293b", small: "#64748b",
-      });
+      }, nGores, saIn);
     }
 
     function drawPattern(R, d, sliceR) {
-      lastPatternArgs = [R, d, sliceR];
+      const nGores = parseInt(segSlider.value);
+      const saIn   = parseFloat(saSlider.value);
+      lastPatternArgs = [R, d, sliceR, nGores, saIn];
       const canvas = document.getElementById("pattern-canvas");
       const ctx = canvas.getContext("2d");
       const W = canvas.width, H = canvas.height;
@@ -392,10 +420,10 @@
         seam: "rgb(251,146,60)", base: "#93c5fd",
         axis: "#334155", dot: "rgb(251,146,60)",
         dim: "#94a3b8", lab: "#e2e8f0", small: "#64748b",
-      });
+      }, nGores, saIn);
     }
 
-    function renderPattern(ctx, W, H, R, d, sliceR, clr) {
+    function renderPattern(ctx, W, H, R, d, sliceR, clr, nGores, saIn) {
       ctx.fillStyle = clr.bg;
       ctx.fillRect(0, 0, W, H);
 
@@ -405,7 +433,7 @@
       // satisfies cos(θ) = −d/R. The orange cap spans from north pole to this angle.
       const thetaBase  = Math.acos(Math.max(-1, Math.min(1, -d / R)));
       const arcH       = R * thetaBase;            // arc height (apex → base)
-      const baseHW     = (Math.PI / 4) * sliceR;   // half-width at base
+      const baseHW     = (Math.PI / nGores) * sliceR;   // half-width at base
       if (arcH < 0.001) return;
 
       // Layout margins
@@ -419,22 +447,22 @@
       function gx(goreX) { return cx + goreX * scale; }
       function gy(goreY) { return ay + goreY * scale; }
 
-      // Build side-curve points (N segments)
-      const N = 240;
+      // Build side-curve points (STEPS sample points)
+      const STEPS = 240;
       const left = [], right = [];
-      for (let i = 0; i <= N; i++) {
-        const y = (i / N) * arcH;
-        const hw = (Math.PI / 4) * R * Math.sin(y / R);
+      for (let i = 0; i <= STEPS; i++) {
+        const y = (i / STEPS) * arcH;
+        const hw = (Math.PI / nGores) * R * Math.sin(y / R);
         left.push([gx(-hw), gy(y)]);
         right.push([gx(hw), gy(y)]);
       }
 
       // Compute seam curve length (2-D, in real units)
       let seamLen = 0;
-      for (let i = 0; i < N; i++) {
-        const y0 = (i / N) * arcH, y1 = ((i + 1) / N) * arcH;
-        const hw0 = (Math.PI / 4) * R * Math.sin(y0 / R);
-        const hw1 = (Math.PI / 4) * R * Math.sin(y1 / R);
+      for (let i = 0; i < STEPS; i++) {
+        const y0 = (i / STEPS) * arcH, y1 = ((i + 1) / STEPS) * arcH;
+        const hw0 = (Math.PI / nGores) * R * Math.sin(y0 / R);
+        const hw1 = (Math.PI / nGores) * R * Math.sin(y1 / R);
         seamLen += Math.hypot(hw1 - hw0, y1 - y0);
       }
 
@@ -442,14 +470,14 @@
       ctx.beginPath();
       ctx.moveTo(left[0][0], left[0][1]);
       left.forEach(([x, y]) => ctx.lineTo(x, y));
-      ctx.lineTo(right[N][0], right[N][1]);
-      for (let i = N; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1]);
+      ctx.lineTo(right[STEPS][0], right[STEPS][1]);
+      for (let i = STEPS; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1]);
       ctx.closePath();
       ctx.fillStyle = clr.fill;
       ctx.fill();
 
       // ── Seam allowance ──────────────────────────────────────────────────
-      const SA_IN = 3 / 8;
+      const SA_IN = saIn;
       const SA_PX = SA_IN * scale;
 
       const leftOff  = offsetPts(left,  SA_PX, +1);
@@ -461,9 +489,9 @@
       ctx.moveTo(leftOff[0][0], leftOff[0][1]);
       ctx.lineTo(rightOff[0][0], rightOff[0][1]);
       rightOff.forEach(([x, y]) => ctx.lineTo(x, y));
-      ctx.lineTo(rightOff[N][0], baseOffY);
-      ctx.lineTo(leftOff[N][0],  baseOffY);
-      for (let i = N; i >= 0; i--) ctx.lineTo(leftOff[i][0], leftOff[i][1]);
+      ctx.lineTo(rightOff[STEPS][0], baseOffY);
+      ctx.lineTo(leftOff[STEPS][0],  baseOffY);
+      for (let i = STEPS; i >= 0; i--) ctx.lineTo(leftOff[i][0], leftOff[i][1]);
       ctx.closePath();
       ctx.fillStyle = "rgba(251,146,60,0.08)";
       ctx.fill();
@@ -473,9 +501,9 @@
       ctx.moveTo(leftOff[0][0], leftOff[0][1]);
       ctx.lineTo(rightOff[0][0], rightOff[0][1]);
       rightOff.forEach(([x, y]) => ctx.lineTo(x, y));
-      ctx.lineTo(rightOff[N][0], baseOffY);
-      ctx.lineTo(leftOff[N][0],  baseOffY);
-      for (let i = N; i >= 0; i--) ctx.lineTo(leftOff[i][0], leftOff[i][1]);
+      ctx.lineTo(rightOff[STEPS][0], baseOffY);
+      ctx.lineTo(leftOff[STEPS][0],  baseOffY);
+      for (let i = STEPS; i >= 0; i--) ctx.lineTo(leftOff[i][0], leftOff[i][1]);
       ctx.closePath();
       ctx.setLineDash([6, 3]);
       ctx.strokeStyle = clr.seam;
@@ -502,8 +530,8 @@
 
       // ── Base (straight) ─────────────────────────────────────────────────
       ctx.beginPath();
-      ctx.moveTo(left[N][0], left[N][1]);
-      ctx.lineTo(right[N][0], right[N][1]);
+      ctx.moveTo(left[STEPS][0], left[STEPS][1]);
+      ctx.lineTo(right[STEPS][0], right[STEPS][1]);
       ctx.strokeStyle = clr.base;
       ctx.lineWidth = 2;
       ctx.stroke();
@@ -547,7 +575,7 @@
       ctx.fillText(`w = ${(2 * baseHW).toFixed(3)} in`, cx, wArrowY + 8);
 
       // Seam allowance annotation — perpendicular arrow on right side at ~25% height
-      const saIdx = Math.floor(N * 0.25);
+      const saIdx = Math.floor(STEPS * 0.25);
       const [sewX, sewY]   = right[saIdx];
       const [cutX, cutY]   = rightOff[saIdx];
       dimArrow(ctx, sewX, sewY, cutX, cutY, dimClr);
@@ -586,7 +614,7 @@
       ctx.fillText("sew",  legX + 5, legY + 14);
 
       // Seam length labels (at ~55% height along each side)
-      const si = Math.floor(N * 0.55);
+      const si = Math.floor(STEPS * 0.55);
       const [lx, ly] = left[si];
       const [rx, ry] = right[si];
 
@@ -624,10 +652,9 @@
       ctx.fillText(`base  ${(2 * baseHW).toFixed(3)} in`, cx, gy(arcH) + 6);
 
       // Apex angle arc + label
-      const apexAngleDeg = (2 * Math.atan(Math.PI / 4) * 180 / Math.PI);
+      const apexAngleDeg = (2 * Math.atan(Math.PI / nGores) * 180 / Math.PI);
       const arcR = Math.min(30, arcH * scale * 0.18);
-      // In canvas coords: right side goes toward (π/4, 1) direction → atan2(1, π/4) ≈ 51.8°
-      const sideAngle = Math.atan2(1, Math.PI / 4); // angle from +x axis, going down-right
+      const sideAngle = Math.atan2(1, Math.PI / nGores); // angle from +x axis, going down-right
       ctx.beginPath();
       ctx.arc(cx, ay, arcR, Math.PI - sideAngle, sideAngle);
       ctx.strokeStyle = smallClr;
@@ -757,7 +784,7 @@
 
     document.getElementById("export-a4-btn").addEventListener("click", () => {
       if (!lastPatternArgs) return;
-      const [R, d, sliceR] = lastPatternArgs;
+      const [R, d, sliceR, nGores] = lastPatternArgs;
 
       // A4 at 150 DPI
       const DPI    = 150;
@@ -779,7 +806,7 @@
       const mL = 55, mR = 145, mT = 75, mB = 70;
       const thetaBase = Math.acos(Math.max(-1, Math.min(1, -d / R)));
       const arcH  = R * thetaBase;
-      const baseHW = (Math.PI / 4) * sliceR;
+      const baseHW = (Math.PI / nGores) * sliceR;
       const usedScale = Math.min((canvasW - mL - mR) / (2 * baseHW),
                                  (canvasH - mT - mB) / arcH);
       const printPct  = usedScale / DPI * 100; // percent of true 1:1
